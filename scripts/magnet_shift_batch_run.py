@@ -60,7 +60,7 @@ PROJECT_DIR = r"D:\EM\132frame - 7.5kw"
 OUTPUT_DIR = SOURCE_DIR
 
 # AEDT version string, e.g. "2024.2", "2025.1", "2026.1".
-AEDT_VERSION = "2024.2"
+AEDT_VERSION = "2026.1"
 
 # ---------------------------------------------------------------------------
 # Constants – these should not normally need to be changed
@@ -190,12 +190,29 @@ def main() -> None:
     print(f"Using project: {aedt_file!r}")
 
     os.makedirs(OUTPUT_DIR, exist_ok=True)
-    # Temporary directory for raw report exports (cleaned up per CSV file).
+    # Temporary directory for raw report exports (cleaned up at the end).
     temp_dir = tempfile.mkdtemp(prefix="aedt_export_")
+
+    # Connect to AEDT ONCE before the loop.  Creating Maxwell3d multiple times
+    # inside the loop would try to re-initialise a gRPC Desktop session for
+    # each iteration, which deadlocks when the script is executed from within
+    # AEDT ("Run PyAEDT Script") because AEDT is single-threaded and already
+    # busy running the script.
+    m3d = Maxwell3d(
+        project=project_name,
+        design=DESIGN_MAP[SEGMENT_COUNTS[0]],
+        version=AEDT_VERSION,
+        new_desktop=False,
+        close_on_exit=False,
+    )
 
     try:
         for n_segments in SEGMENT_COUNTS:
             design_name = DESIGN_MAP[n_segments]
+
+            # Switch the active design (reuses the existing gRPC connection).
+            print(f"\nSwitching to design: {design_name!r}")
+            m3d.set_active_design(design_name)
 
             for variant in VARIANTS:
                 csv_path = _source_csv_path(n_segments, variant)
@@ -215,17 +232,6 @@ def main() -> None:
 
                 # Per-report accumulator: list of DataFrames, one per opt. row.
                 report_frames: dict[str, list[pd.DataFrame]] = {r: [] for r in REPORTS}
-
-                # Attach to the design once per variant (switch design between
-                # segment counts).  new_desktop=False reuses the running AEDT
-                # session; close_on_exit=False leaves the project open.
-                m3d = Maxwell3d(
-                    project=project_name,
-                    design=design_name,
-                    version=AEDT_VERSION,
-                    new_desktop=False,
-                    close_on_exit=False,
-                )
 
                 for opt_row_label in OPTIMISATION_ROWS:
                     if opt_row_label not in params_df.index:
